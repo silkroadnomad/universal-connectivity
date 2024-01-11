@@ -7,6 +7,8 @@ use futures::StreamExt;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::{
     core::muxing::StreamMuxerBox,
+    ping,
+    dcutr,
     dns, gossipsub, identify, identity,
     kad::record::store::MemoryStore,
     kad::{Kademlia, KademliaConfig},
@@ -41,8 +43,10 @@ const PORT_WEBRTC: u16 = 9090;
 const PORT_QUIC: u16 = 9091;
 const LOCAL_KEY_PATH: &str = "./local_key";
 const LOCAL_CERT_PATH: &str = "./cert.pem";
-const GOSSIPSUB_CHAT_TOPIC: &str = "universal-connectivity";
-const GOSSIPSUB_CHAT_FILE_TOPIC: &str = "universal-connectivity-file";
+// const GOSSIPSUB_CHAT_TOPIC: &str = "universal-connectivity";
+const GOSSIPSUB_CHAT_TOPIC: &str = "/dContact/1/message/proto";
+
+const GOSSIPSUB_CHAT_FILE_TOPIC: &str = "dcontact._peer-discovery._p2p._pubsub";
 
 #[derive(Debug, Parser)]
 #[clap(name = "universal connectivity rust peer")]
@@ -137,6 +141,9 @@ async fn main() -> Result<()> {
                 SwarmEvent::Behaviour(BehaviourEvent::Relay(e)) => {
                     debug!("{:?}", e);
                 }
+                SwarmEvent::Behaviour(BehaviourEvent::Dcutr(e)) => {
+                    info!("Connected to {:?}", e);
+                }
                 SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                     libp2p::gossipsub::Event::Message {
                         message_id: _,
@@ -154,19 +161,19 @@ async fn main() -> Result<()> {
                     }
 
                     if message.topic == file_topic_hash {
-                        let file_id = String::from_utf8(message.data).unwrap();
-                        info!("Received file {} from {:?}", file_id, message.source);
+//                         let file_id = String::from_utf8(message.data).unwrap();
+                        info!("Received peer from {:?}", message);
 
-                        let request_id = swarm.behaviour_mut().request_response.send_request(
-                            &message.source.unwrap(),
-                            FileRequest {
-                                file_id: file_id.clone(),
-                            },
-                        );
-                        info!(
-                            "Requested file {} to {:?}: req_id:{:?}",
-                            file_id, message.source, request_id
-                        );
+//                         let request_id = swarm.behaviour_mut().request_response.send_request(
+//                             &message.source.unwrap(),
+//                             FileRequest {
+//                                 file_id: file_id.clone(),
+//                             },
+//                         );
+//                         info!(
+//                             "Requested file {} to {:?}: req_id:{:?}",
+//                             file_id, message.source, request_id
+//                         );
                         continue;
                     }
 
@@ -279,13 +286,13 @@ async fn main() -> Result<()> {
                     "Hello world! Sent from the rust-peer at: {:4}s",
                     now.elapsed().as_secs_f64()
                 );
-
-                if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
-                    gossipsub::IdentTopic::new(GOSSIPSUB_CHAT_TOPIC),
-                    message.as_bytes(),
-                ) {
-                    error!("Failed to publish periodic message: {err}")
-                }
+//TODO publish received peer addresses
+//                 if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
+//                     gossipsub::IdentTopic::new(GOSSIPSUB_CHAT_TOPIC),
+//                     message.as_bytes(),
+//                 ) {
+//                     error!("Failed to publish periodic message: {err}")
+//                 }
             }
         }
     }
@@ -293,6 +300,9 @@ async fn main() -> Result<()> {
 
 #[derive(NetworkBehaviour)]
 struct Behaviour {
+//     relay_client: relay::client::Behaviour,
+    ping: ping::Behaviour,
+    dcutr: dcutr::Behaviour,
     gossipsub: gossipsub::Behaviour,
     identify: identify::Behaviour,
     kademlia: Kademlia<MemoryStore>,
@@ -358,8 +368,9 @@ fn create_swarm(
     cfg.set_protocol_names(vec![KADEMLIA_PROTOCOL_NAME]);
     let store = MemoryStore::new(local_peer_id);
     let kad_behaviour = Kademlia::with_config(local_peer_id, store, cfg);
-
     let behaviour = Behaviour {
+        ping: ping::Behaviour::new(ping::Config::new()),
+        dcutr: dcutr::Behaviour::new(local_key.public().to_peer_id()),
         gossipsub,
         identify: identify_config,
         kademlia: kad_behaviour,
