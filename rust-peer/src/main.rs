@@ -22,6 +22,7 @@ use libp2p_webrtc as webrtc;
 use libp2p_webrtc::tokio::Certificate;
 use log::{debug, error, info, warn};
 use protocol::FileExchangeCodec;
+use prost::Message;
 use std::iter;
 use std::net::IpAddr;
 use std::path::Path;
@@ -32,7 +33,8 @@ use std::{
 };
 use tokio::fs;
 
-use crate::protocol::FileRequest;
+//include!(concat!(env!("OUT_DIR"), "/peer.rs"));
+include!(concat!(env!("OUT_DIR"), "/decontact.rs"));
 
 const TICK_INTERVAL: Duration = Duration::from_secs(15);
 const KADEMLIA_PROTOCOL_NAME: StreamProtocol =
@@ -43,10 +45,8 @@ const PORT_WEBRTC: u16 = 9090;
 const PORT_QUIC: u16 = 9091;
 const LOCAL_KEY_PATH: &str = "./local_key";
 const LOCAL_CERT_PATH: &str = "./cert.pem";
-// const GOSSIPSUB_CHAT_TOPIC: &str = "universal-connectivity";
 const GOSSIPSUB_CHAT_TOPIC: &str = "/dContact/1/message/proto";
-
-const GOSSIPSUB_CHAT_FILE_TOPIC: &str = "dcontact._peer-discovery._p2p._pubsub";
+const GOSSIPSUB_PEER_DISCOVERY: &str = "dcontact._peer-discovery._p2p._pubsub";
 
 #[derive(Debug, Parser)]
 #[clap(name = "universal connectivity rust peer")]
@@ -60,10 +60,10 @@ struct Opt {
     external_address: Option<IpAddr>,
 
     /// Nodes to connect to on startup. Can be specified several times.
-    #[clap(
-        long,
-        default_value = "/dns/universal-connectivity-rust-peer.fly.dev/udp/9091/quic-v1"
-    )]
+//     #[clap(
+//         long,
+//         default_value = "/dns/universal-connectivity-rust-peer.fly.dev/udp/9091/quic-v1"
+//     )]
     connect: Vec<Multiaddr>,
 }
 
@@ -104,7 +104,7 @@ async fn main() -> Result<()> {
     }
 
     let chat_topic_hash = gossipsub::IdentTopic::new(GOSSIPSUB_CHAT_TOPIC).hash();
-    let file_topic_hash = gossipsub::IdentTopic::new(GOSSIPSUB_CHAT_FILE_TOPIC).hash();
+    let peer_discovery = gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY).hash();
 
     let mut tick = futures_timer::Delay::new(TICK_INTERVAL);
 
@@ -160,20 +160,22 @@ async fn main() -> Result<()> {
                         continue;
                     }
 
-                    if message.topic == file_topic_hash {
-//                         let file_id = String::from_utf8(message.data).unwrap();
-                        info!("Received peer from {:?}", message);
+                    if message.topic == peer_discovery {
+                        let peer = Peer::decode(&*message.data).unwrap();
+                        //info!("Received peer from {:?}", peer.addrs);
+                        for addr in &peer.addrs {
+                            if let Ok(multiaddr) = Multiaddr::try_from(addr.clone()) {
+                                info!("Received address: {:?}", multiaddr.to_string());
 
-//                         let request_id = swarm.behaviour_mut().request_response.send_request(
-//                             &message.source.unwrap(),
-//                             FileRequest {
-//                                 file_id: file_id.clone(),
-//                             },
-//                         );
-//                         info!(
-//                             "Requested file {} to {:?}: req_id:{:?}",
-//                             file_id, message.source, request_id
-//                         );
+                                if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
+                                                         gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY),
+                                                         &*message.data,)
+                                {error!("Failed to publish peer: {err}")}
+                            } else {
+                                error!("Failed to parse multiaddress");
+                            }
+                        }
+
                         continue;
                     }
 
@@ -282,16 +284,21 @@ async fn main() -> Result<()> {
                     debug!("Failed to run Kademlia bootstrap: {e:?}");
                 }
 
-                let message = format!(
-                    "Hello world! Sent from the rust-peer at: {:4}s",
-                    now.elapsed().as_secs_f64()
-                );
-//TODO publish received peer addresses
+//                 let message = format!(
+//                     "Hello world! Sent from the rust-peer at: {:4}s",
+//                     now.elapsed().as_secs_f64()
+//                 );
+//                 let peer = Peer {
+//                     public_key: local_key.public().to_vec(),
+//                     addrs: swarm.external_addresses().map(|a| a.to_vec()).collect(),
+//                 };
+//                 let mut buf = Vec::new();
+//                 peer.encode(&mut buf)?;
 //                 if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
-//                     gossipsub::IdentTopic::new(GOSSIPSUB_CHAT_TOPIC),
-//                     message.as_bytes(),
+//                     gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY),
+//                     &buf,
 //                 ) {
-//                     error!("Failed to publish periodic message: {err}")
+//                     error!("Failed to publish peer: {err}")
 //                 }
             }
         }
@@ -344,7 +351,7 @@ fn create_swarm(
 
     // Create/subscribe Gossipsub topics
     gossipsub.subscribe(&gossipsub::IdentTopic::new(GOSSIPSUB_CHAT_TOPIC))?;
-    gossipsub.subscribe(&gossipsub::IdentTopic::new(GOSSIPSUB_CHAT_FILE_TOPIC))?;
+    gossipsub.subscribe(&gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY))?;
 
     let transport = {
         let webrtc = webrtc::tokio::Transport::new(local_key.clone(), certificate);
