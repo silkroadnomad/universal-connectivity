@@ -60,11 +60,11 @@ struct Opt {
     external_address: Option<IpAddr>,
 
     /// Nodes to connect to on startup. Can be specified several times.
-//     #[clap(
-//         long,
-//         default_value = "/dns/universal-connectivity-rust-peer.fly.dev/udp/9091/quic-v1"
-//     )]
     connect: Vec<Multiaddr>,
+
+    /// Gossipsub peer discovery topic.
+    #[clap(long, default_value = "dcontact._peer-discovery._p2p._pubsub")]
+    gossipsub_peer_discovery: String,
 }
 
 /// An example WebRTC peer that will accept connections
@@ -80,7 +80,7 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to read certificate")?;
 
-    let mut swarm = create_swarm(local_key, webrtc_cert)?;
+    let mut swarm = create_swarm(local_key, webrtc_cert, &opt)?;
 
     let address_webrtc = Multiaddr::from(opt.listen_address)
         .with(Protocol::Udp(PORT_WEBRTC))
@@ -321,6 +321,7 @@ struct Behaviour {
 fn create_swarm(
     local_key: identity::Keypair,
     certificate: Certificate,
+    opt:&Opt
 ) -> Result<Swarm<Behaviour>> {
     let local_peer_id = PeerId::from(local_key.public());
     debug!("Local peer id: {local_peer_id}");
@@ -351,7 +352,7 @@ fn create_swarm(
 
     // Create/subscribe Gossipsub topics
     gossipsub.subscribe(&gossipsub::IdentTopic::new(GOSSIPSUB_CHAT_TOPIC))?;
-    gossipsub.subscribe(&gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY))?;
+    gossipsub.subscribe(&gossipsub::IdentTopic::new(&opt.gossipsub_peer_discovery))?;
 
     let transport = {
         let webrtc = webrtc::tokio::Transport::new(local_key.clone(), certificate);
