@@ -67,6 +67,10 @@ npm run dev
 ```
 cd rust-peer
 cargo run
+
+To start the Rust Peer with an argument, you can use the following command:
+cargo run -- --gossipsub-peer-discovery dev-dcontact._peer-discovery._p2p._pubsub
+
 ```
 
 This will automatically connect you to the bootstrap node running on [fly.io](https://fly.io).
