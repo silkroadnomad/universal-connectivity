@@ -10,8 +10,6 @@ use libp2p::{
     ping,
     dcutr,
     dns, gossipsub, identify, identity,
-    kad::record::store::MemoryStore,
-    kad::{Kademlia, KademliaConfig},
     memory_connection_limits,
     multiaddr::{Multiaddr, Protocol},
     quic, relay,
@@ -33,19 +31,13 @@ use std::{
 };
 use tokio::fs;
 
-//include!(concat!(env!("OUT_DIR"), "/peer.rs"));
 include!(concat!(env!("OUT_DIR"), "/decontact.rs"));
 
 const TICK_INTERVAL: Duration = Duration::from_secs(15);
-const KADEMLIA_PROTOCOL_NAME: StreamProtocol =
-    StreamProtocol::new("/universal-connectivity/lan/kad/1.0.0");
-const FILE_EXCHANGE_PROTOCOL: StreamProtocol =
-    StreamProtocol::new("/universal-connectivity-file/1");
 const PORT_WEBRTC: u16 = 9090;
 const PORT_QUIC: u16 = 9091;
 const LOCAL_KEY_PATH: &str = "./local_key";
 const LOCAL_CERT_PATH: &str = "./cert.pem";
-const GOSSIPSUB_CHAT_TOPIC: &str = "/dContact/1/message/proto";
 const GOSSIPSUB_PEER_DISCOVERY: &str = "dcontact._peer-discovery._p2p._pubsub";
 
 #[derive(Debug, Parser)]
@@ -103,7 +95,6 @@ async fn main() -> Result<()> {
         }
     }
 
-    let chat_topic_hash = gossipsub::IdentTopic::new(GOSSIPSUB_CHAT_TOPIC).hash();
     let peer_discovery = gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY).hash();
 
     let mut tick = futures_timer::Delay::new(TICK_INTERVAL);
@@ -135,8 +126,8 @@ async fn main() -> Result<()> {
                 }
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     warn!("Connection to {peer_id} closed: {cause:?}");
-                    swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
-                    info!("Removed {peer_id} from the routing table (if it was in there).");
+//                     swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
+//                     info!("Removed {peer_id} from the routing table (if it was in there).");
                 }
                 SwarmEvent::Behaviour(BehaviourEvent::Relay(e)) => {
                     debug!("{:?}", e);
@@ -151,15 +142,6 @@ async fn main() -> Result<()> {
                         message,
                     },
                 )) => {
-                    if message.topic == chat_topic_hash {
-                        info!(
-                            "Received message from {:?}: {}",
-                            message.source,
-                            String::from_utf8(message.data).unwrap()
-                        );
-                        continue;
-                    }
-
                     if message.topic == peer_discovery {
                         let peer = Peer::decode(&*message.data).unwrap();
                         //info!("Received peer from {:?}", peer.addrs);
@@ -192,10 +174,6 @@ async fn main() -> Result<()> {
                     if let identify::Event::Error { peer_id, error } = e {
                         match error {
                             libp2p::swarm::StreamUpgradeError::Timeout => {
-                                // When a browser tab closes, we don't get a swarm event
-                                // maybe there's a way to get this with TransportEvent
-                                // but for now remove the peer from routing table if there's an Identify timeout
-                                swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
                                 info!("Removed {peer_id} from the routing table (if it was in there).");
                             }
                             _ => {
@@ -214,63 +192,10 @@ async fn main() -> Result<()> {
                     } = e
                     {
                         debug!("identify::Event::Received observed_addr: {}", observed_addr);
-
                         swarm.add_external_address(observed_addr);
-
-                        // TODO: The following should no longer be necessary after https://github.com/libp2p/rust-libp2p/pull/4371.
-                        if protocols.iter().any(|p| p == &KADEMLIA_PROTOCOL_NAME) {
-                            for addr in listen_addrs {
-                                debug!("identify::Event::Received listen addr: {}", addr);
-                                // TODO (fixme): the below doesn't work because the address is still missing /webrtc/p2p even after https://github.com/libp2p/js-libp2p-webrtc/pull/121
-                                // swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
-
-                                let webrtc_address = addr
-                                    .with(Protocol::WebRTCDirect)
-                                    .with(Protocol::P2p(peer_id));
-
-                                swarm
-                                    .behaviour_mut()
-                                    .kademlia
-                                    .add_address(&peer_id, webrtc_address.clone());
-                                info!("Added {webrtc_address} to the routing table.");
-                            }
-                        }
-                    }
-                }
-                SwarmEvent::Behaviour(BehaviourEvent::Kademlia(e)) => {
-                    debug!("Kademlia event: {:?}", e);
-                }
-                SwarmEvent::Behaviour(BehaviourEvent::RequestResponse(
-                    request_response::Event::Message { message, .. },
-                )) => match message {
-                    request_response::Message::Request { request, .. } => {
-                        //TODO: support ProtocolSupport::Full
-                        debug!(
-                            "umimplemented: request_response::Message::Request: {:?}",
-                            request
-                        );
-                    }
-                    request_response::Message::Response { response, .. } => {
-                        info!(
-                            "request_response::Message::Response: size:{}",
-                            response.file_body.len()
-                        );
-                        // TODO: store this file (in memory or disk) and provider it via Kademlia
                     }
                 },
-                SwarmEvent::Behaviour(BehaviourEvent::RequestResponse(
-                    request_response::Event::OutboundFailure {
-                        request_id, error, ..
-                    },
-                )) => {
-                    error!(
-                        "request_response::Event::OutboundFailure for request {:?}: {:?}",
-                        request_id, error
-                    );
-                }
-                event => {
-                    debug!("Other type of event: {:?}", event);
-                }
+                _ => {},
             },
             Either::Right(_) => {
                 tick = futures_timer::Delay::new(TICK_INTERVAL);
@@ -279,27 +204,6 @@ async fn main() -> Result<()> {
                     "external addrs: {:?}",
                     swarm.external_addresses().collect::<Vec<&Multiaddr>>()
                 );
-
-                if let Err(e) = swarm.behaviour_mut().kademlia.bootstrap() {
-                    debug!("Failed to run Kademlia bootstrap: {e:?}");
-                }
-
-//                 let message = format!(
-//                     "Hello world! Sent from the rust-peer at: {:4}s",
-//                     now.elapsed().as_secs_f64()
-//                 );
-//                 let peer = Peer {
-//                     public_key: local_key.public().to_vec(),
-//                     addrs: swarm.external_addresses().map(|a| a.to_vec()).collect(),
-//                 };
-//                 let mut buf = Vec::new();
-//                 peer.encode(&mut buf)?;
-//                 if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
-//                     gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY),
-//                     &buf,
-//                 ) {
-//                     error!("Failed to publish peer: {err}")
-//                 }
             }
         }
     }
@@ -307,14 +211,12 @@ async fn main() -> Result<()> {
 
 #[derive(NetworkBehaviour)]
 struct Behaviour {
-//     relay_client: relay::client::Behaviour,
     ping: ping::Behaviour,
     dcutr: dcutr::Behaviour,
     gossipsub: gossipsub::Behaviour,
     identify: identify::Behaviour,
-    kademlia: Kademlia<MemoryStore>,
     relay: relay::Behaviour,
-    request_response: request_response::Behaviour<FileExchangeCodec>,
+//     request_response: request_response::Behaviour<FileExchangeCodec>,
     connection_limits: memory_connection_limits::Behaviour,
 }
 
@@ -351,7 +253,6 @@ fn create_swarm(
     .expect("Correct configuration");
 
     // Create/subscribe Gossipsub topics
-    gossipsub.subscribe(&gossipsub::IdentTopic::new(GOSSIPSUB_CHAT_TOPIC))?;
     gossipsub.subscribe(&gossipsub::IdentTopic::new(&opt.gossipsub_peer_discovery))?;
 
     let transport = {
@@ -371,17 +272,11 @@ fn create_swarm(
             .with_interval(Duration::from_secs(60)), // do this so we can get timeouts for dropped WebRTC connections
     );
 
-    // Create a Kademlia behaviour.
-    let mut cfg = KademliaConfig::default();
-    cfg.set_protocol_names(vec![KADEMLIA_PROTOCOL_NAME]);
-    let store = MemoryStore::new(local_peer_id);
-    let kad_behaviour = Kademlia::with_config(local_peer_id, store, cfg);
     let behaviour = Behaviour {
         ping: ping::Behaviour::new(ping::Config::new()),
         dcutr: dcutr::Behaviour::new(local_key.public().to_peer_id()),
         gossipsub,
         identify: identify_config,
-        kademlia: kad_behaviour,
         relay: relay::Behaviour::new(
             local_peer_id,
             relay::Config {
@@ -394,11 +289,11 @@ fn create_swarm(
                 ..Default::default()
             },
         ),
-        request_response: request_response::Behaviour::new(
-            // TODO: support ProtocolSupport::Full
-            iter::once((FILE_EXCHANGE_PROTOCOL, ProtocolSupport::Outbound)),
-            Default::default(),
-        ),
+//         request_response: request_response::Behaviour::new(
+//             // TODO: support ProtocolSupport::Full
+//             iter::once((FILE_EXCHANGE_PROTOCOL, ProtocolSupport::Outbound)),
+//             Default::default(),
+//         ),
         connection_limits: memory_connection_limits::Behaviour::with_max_percentage(0.9),
     };
     Ok(
