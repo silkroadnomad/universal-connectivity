@@ -51,12 +51,15 @@ struct Opt {
     #[clap(long, env)]
     external_address: Option<IpAddr>,
 
-    /// Nodes to connect to on startup. Can be specified several times.
-    connect: Vec<Multiaddr>,
-
     /// Gossipsub peer discovery topic.
     #[clap(long, default_value = "dcontact._peer-discovery._p2p._pubsub")]
     gossipsub_peer_discovery: String,
+
+    #[clap(
+        long,
+        default_value = "/dns4/ipfs.le-space.de/tcp/p2p/12D3KooWAJjbRkp8FPF5MKgMU53aUTxWkqvDrs4zc1VMbwRwfsbE"
+    )]
+    connect: Vec<Multiaddr>
 }
 
 /// An example WebRTC peer that will accept connections
