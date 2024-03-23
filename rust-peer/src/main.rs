@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use futures::future::{select, Either};
 use futures::StreamExt;
+// use futures::stream::StreamExt;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::{
     core::muxing::StreamMuxerBox,
@@ -14,9 +15,10 @@ use libp2p::{
     multiaddr::{Multiaddr, Protocol},
     quic, relay,
     swarm::{NetworkBehaviour, Swarm, SwarmEvent},
-    PeerId, StreamProtocol, SwarmBuilder
+    PeerId, StreamProtocol, SwarmBuilder, Transport
 };
 use libp2p_webrtc as webrtc;
+// use libp2p::Transport;
 use libp2p_webrtc::tokio::Certificate;
 use log::{debug, error, info, warn};
 use prost::Message;
@@ -79,9 +81,9 @@ async fn main() -> Result<()> {
     let address_tcp = Multiaddr::from(opt.listen_address)
         .with(Protocol::Tcp(PORT_TCP));
 
-    // let address_webrtc = Multiaddr::from(opt.listen_address)
-    //     .with(Protocol::Udp(PORT_WEBRTC))
-    //     .with(Protocol::WebRTCDirect);
+    let address_webrtc = Multiaddr::from(opt.listen_address)
+         .with(Protocol::Udp(PORT_WEBRTC))
+         .with(Protocol::WebRTCDirect);
 
     let address_quic = Multiaddr::from(opt.listen_address)
         .with(Protocol::Udp(PORT_QUIC))
@@ -90,9 +92,9 @@ async fn main() -> Result<()> {
     swarm
         .listen_on(address_tcp.clone())
         .expect("listen on tcp");
-    // swarm
-    //     .listen_on(address_webrtc.clone())
-    //     .expect("listen on webrtc");
+    swarm
+        .listen_on(address_webrtc.clone())
+        .expect("listen on webrtc");
     swarm
         .listen_on(address_quic.clone())
         .expect("listen on quic");
@@ -299,24 +301,25 @@ fn create_swarm(
         connection_limits: memory_connection_limits::Behaviour::with_max_percentage(0.9),
     };
 
-        let swarm = libp2p::SwarmBuilder::with_new_identity()
-            .with_tokio()
-            .with_tcp(
-                tcp::Config::default(),
-                noise::Config::new,
-                yamux::Config::default,
-            )?
-            .with_quic()
-//             .with_behaviour(|key| Behaviour::new(key.public()))?
-            .with_behaviour(|key| behaviour)?
-//             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
-            .build();
+    let swarm = libp2p::SwarmBuilder::with_new_identity()
+        .with_tokio()
+        .with_tcp(
+            tcp::Config::default(),
+            noise::Config::new,
+            yamux::Config::default,
+        )?
+        .with_quic()
+        .with_other_transport(|id_keys| {
+            Ok(webrtc::tokio::Transport::new(
+                id_keys.clone(),
+               certificate,
+            )
+            .map(|(peer_id, conn), _| (peer_id, StreamMuxerBox::new(conn))))
+        })?
+        .with_behaviour(|key| behaviour)?
+        .build();
 
-    Ok(swarm
-//         SwarmBuilder::with_tokio_executor(transport, behaviour, local_peer_id)
-//             .idle_connection_timeout(Duration::from_secs(60))
-//             .build(),
-    )
+    Ok(swarm)
 }
 
 async fn read_or_create_certificate(path: &Path) -> Result<Certificate> {
