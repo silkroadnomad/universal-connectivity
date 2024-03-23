@@ -1,5 +1,3 @@
-mod protocol;
-
 use anyhow::{Context, Result};
 use clap::Parser;
 use futures::future::{select, Either};
@@ -7,21 +5,21 @@ use futures::StreamExt;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::{
     core::muxing::StreamMuxerBox,
+    yamux, noise,
+    tcp,
     ping,
     dcutr,
     dns, gossipsub, identify, identity,
     memory_connection_limits,
     multiaddr::{Multiaddr, Protocol},
     quic, relay,
-    swarm::{NetworkBehaviour, Swarm, SwarmBuilder, SwarmEvent},
-    PeerId, StreamProtocol, Transport,
+    swarm::{NetworkBehaviour, Swarm, SwarmEvent},
+    PeerId, StreamProtocol, SwarmBuilder
 };
 use libp2p_webrtc as webrtc;
 use libp2p_webrtc::tokio::Certificate;
 use log::{debug, error, info, warn};
-use protocol::FileExchangeCodec;
 use prost::Message;
-use std::iter;
 use std::net::IpAddr;
 use std::path::Path;
 use std::{
@@ -34,6 +32,7 @@ use tokio::fs;
 include!(concat!(env!("OUT_DIR"), "/decontact.rs"));
 
 const TICK_INTERVAL: Duration = Duration::from_secs(15);
+const PORT_TCP: u16 = 1234;
 const PORT_WEBRTC: u16 = 9090;
 const PORT_QUIC: u16 = 9091;
 const LOCAL_KEY_PATH: &str = "./local_key";
@@ -57,7 +56,7 @@ struct Opt {
 
     #[clap(
         long,
-        default_value = "/dns4/ipfs.le-space.de/tcp/p2p/12D3KooWAJjbRkp8FPF5MKgMU53aUTxWkqvDrs4zc1VMbwRwfsbE"
+        default_value = "/dns4/ipfs.le-space.de/tcp/1234/p2p/12D3KooWAJjbRkp8FPF5MKgMU53aUTxWkqvDrs4zc1VMbwRwfsbE"
     )]
     connect: Vec<Multiaddr>
 }
@@ -77,17 +76,23 @@ async fn main() -> Result<()> {
 
     let mut swarm = create_swarm(local_key, webrtc_cert, &opt)?;
 
-    let address_webrtc = Multiaddr::from(opt.listen_address)
-        .with(Protocol::Udp(PORT_WEBRTC))
-        .with(Protocol::WebRTCDirect);
+    let address_tcp = Multiaddr::from(opt.listen_address)
+        .with(Protocol::Tcp(PORT_TCP));
+
+    // let address_webrtc = Multiaddr::from(opt.listen_address)
+    //     .with(Protocol::Udp(PORT_WEBRTC))
+    //     .with(Protocol::WebRTCDirect);
 
     let address_quic = Multiaddr::from(opt.listen_address)
         .with(Protocol::Udp(PORT_QUIC))
         .with(Protocol::QuicV1);
 
     swarm
-        .listen_on(address_webrtc.clone())
-        .expect("listen on webrtc");
+        .listen_on(address_tcp.clone())
+        .expect("listen on tcp");
+    // swarm
+    //     .listen_on(address_webrtc.clone())
+    //     .expect("listen on webrtc");
     swarm
         .listen_on(address_quic.clone())
         .expect("listen on quic");
@@ -102,7 +107,6 @@ async fn main() -> Result<()> {
 
     let mut tick = futures_timer::Delay::new(TICK_INTERVAL);
 
-    let now = Instant::now();
     loop {
         match select(swarm.next(), &mut tick).await {
             Either::Left((event, _)) => match event.unwrap() {
@@ -258,17 +262,17 @@ fn create_swarm(
     // Create/subscribe Gossipsub topics
     gossipsub.subscribe(&gossipsub::IdentTopic::new(&opt.gossipsub_peer_discovery))?;
 
-    let transport = {
-        let webrtc = webrtc::tokio::Transport::new(local_key.clone(), certificate);
-        let quic = quic::tokio::Transport::new(quic::Config::new(&local_key));
-
-        let mapped = webrtc.or_transport(quic).map(|fut, _| match fut {
-            Either::Right((local_peer_id, conn)) => (local_peer_id, StreamMuxerBox::new(conn)),
-            Either::Left((local_peer_id, conn)) => (local_peer_id, StreamMuxerBox::new(conn)),
-        });
-
-        dns::TokioDnsConfig::system(mapped)?.boxed()
-    };
+//     let transport = {
+//         let webrtc = webrtc::tokio::Transport::new(local_key.clone(), certificate);
+//         let quic = quic::tokio::Transport::new(quic::Config::new(&local_key));
+//
+//         let mapped = webrtc.or_transport(quic).map(|fut, _| match fut {
+//             Either::Right((local_peer_id, conn)) => (local_peer_id, StreamMuxerBox::new(conn)),
+//             Either::Left((local_peer_id, conn)) => (local_peer_id, StreamMuxerBox::new(conn)),
+//         });
+//
+//         dns::TokioDnsConfig::system(mapped)?.boxed()
+//     };
 
     let identify_config = identify::Behaviour::new(
         identify::Config::new("/ipfs/0.1.0".into(), local_key.public())
@@ -292,17 +296,26 @@ fn create_swarm(
                 ..Default::default()
             },
         ),
-//         request_response: request_response::Behaviour::new(
-//             // TODO: support ProtocolSupport::Full
-//             iter::once((FILE_EXCHANGE_PROTOCOL, ProtocolSupport::Outbound)),
-//             Default::default(),
-//         ),
         connection_limits: memory_connection_limits::Behaviour::with_max_percentage(0.9),
     };
-    Ok(
-        SwarmBuilder::with_tokio_executor(transport, behaviour, local_peer_id)
-            .idle_connection_timeout(Duration::from_secs(60))
-            .build(),
+
+        let swarm = libp2p::SwarmBuilder::with_new_identity()
+            .with_tokio()
+            .with_tcp(
+                tcp::Config::default(),
+                noise::Config::new,
+                yamux::Config::default,
+            )?
+            .with_quic()
+//             .with_behaviour(|key| Behaviour::new(key.public()))?
+            .with_behaviour(|key| behaviour)?
+//             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
+            .build();
+
+    Ok(swarm
+//         SwarmBuilder::with_tokio_executor(transport, behaviour, local_peer_id)
+//             .idle_connection_timeout(Duration::from_secs(60))
+//             .build(),
     )
 }
 
