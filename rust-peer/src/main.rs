@@ -40,6 +40,7 @@ const PORT_QUIC: u16 = 9091;
 const LOCAL_KEY_PATH: &str = "./local_key";
 const LOCAL_CERT_PATH: &str = "./cert.pem";
 const GOSSIPSUB_PEER_DISCOVERY: &str = "dcontact._peer-discovery._p2p._pubsub";
+const DCONTACT_TOPIC: &str = "/dContact/3/message/proto";
 
 #[derive(Debug, Parser)]
 #[clap(name = "universal connectivity rust peer")]
@@ -53,12 +54,16 @@ struct Opt {
     external_address: Option<IpAddr>,
 
     /// Gossipsub peer discovery topic.
-    #[clap(long, default_value = "dcontact._peer-discovery._p2p._pubsub")]
+    #[clap(long, default_value = GOSSIPSUB_PEER_DISCOVERY)]
     gossipsub_peer_discovery: String,
+
+    /// Gossipsub peer discovery topic.
+    #[clap(long, default_value = DCONTACT_TOPIC)]
+    dcontact_topic: String,
 
     #[clap(
         long,
-        default_value = "/dns4/ipfs.le-space.de/tcp/1234/p2p/12D3KooWAJjbRkp8FPF5MKgMU53aUTxWkqvDrs4zc1VMbwRwfsbE"
+        default_value = "/dns4/ipfs.le-space.de/tcp/1235/p2p/12D3KooWAJjbRkp8FPF5MKgMU53aUTxWkqvDrs4zc1VMbwRwfsbE"
     )]
     connect: Vec<Multiaddr>
 }
@@ -106,6 +111,7 @@ async fn main() -> Result<()> {
     }
 
     let peer_discovery = gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY).hash();
+    let dcontact_topic = gossipsub::IdentTopic::new(DCONTACT_TOPIC).hash();
 
     let mut tick = futures_timer::Delay::new(TICK_INTERVAL);
 
@@ -160,6 +166,25 @@ async fn main() -> Result<()> {
 
                                 if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
                                                          gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY),
+                                                         &*message.data,)
+                                {error!("Failed to publish peer: {err}")}
+                            } else {
+                                error!("Failed to parse multiaddress");
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    if message.topic == dcontact_topic {
+                        let peer = Peer::decode(&*message.data).unwrap();
+                        //info!("Received peer from {:?}", peer.addrs);
+                        for addr in &peer.addrs {
+                            if let Ok(multiaddr) = Multiaddr::try_from(addr.clone()) {
+                                info!("Received address: {:?}", multiaddr.to_string());
+
+                                if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
+                                                         gossipsub::IdentTopic::new(Dcutr),
                                                          &*message.data,)
                                 {error!("Failed to publish peer: {err}")}
                             } else {
