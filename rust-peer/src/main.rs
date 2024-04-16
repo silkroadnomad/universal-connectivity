@@ -283,8 +283,6 @@ struct Behaviour {
     gossipsub: gossipsub::Behaviour,
     identify: identify::Behaviour,
     relay: relay::Behaviour,
-    //relay: relay::Behaviour::new(key.public().to_peer_id(), Default::default()),
-//     request_response: request_response::Behaviour<FileExchangeCodec>,
     connection_limits: memory_connection_limits::Behaviour,
 }
 
@@ -323,18 +321,6 @@ fn create_swarm(
     // Create/subscribe Gossipsub topics
     gossipsub.subscribe(&gossipsub::IdentTopic::new(&opt.gossipsub_peer_discovery))?;
 
-//     let transport = {
-//         let webrtc = webrtc::tokio::Transport::new(local_key.clone(), certificate);
-//         let quic = quic::tokio::Transport::new(quic::Config::new(&local_key));
-//
-//         let mapped = webrtc.or_transport(quic).map(|fut, _| match fut {
-//             Either::Right((local_peer_id, conn)) => (local_peer_id, StreamMuxerBox::new(conn)),
-//             Either::Left((local_peer_id, conn)) => (local_peer_id, StreamMuxerBox::new(conn)),
-//         });
-//
-//         dns::TokioDnsConfig::system(mapped)?.boxed()
-//     };
-
     let identify_config = identify::Behaviour::new(
         identify::Config::new("/ipfs/0.1.0".into(), local_key.public())
             .with_interval(Duration::from_secs(60)), // do this so we can get timeouts for dropped WebRTC connections
@@ -345,18 +331,19 @@ fn create_swarm(
         dcutr: dcutr::Behaviour::new(local_key.public().to_peer_id()),
         gossipsub,
         identify: identify_config,
-        relay: relay::Behaviour::new(
-            local_peer_id,
-            relay::Config {
-                max_reservations: usize::MAX,
-                max_reservations_per_peer: 100,
-                reservation_rate_limiters: Vec::default(),
-                circuit_src_rate_limiters: Vec::default(),
-                max_circuits: usize::MAX,
-                max_circuits_per_peer: 100,
-                ..Default::default()
-            },
-        ),
+        relay: relay::Behaviour::new(local_key.public().to_peer_id(), Default::default()),
+//         relay: relay::Behaviour::new(
+//             local_peer_id,
+//             relay::Config {
+//                 max_reservations: usize::MAX,
+//                 max_reservations_per_peer: 100,
+//                 reservation_rate_limiters: Vec::default(),
+//                 circuit_src_rate_limiters: Vec::default(),
+//                 max_circuits: usize::MAX,
+//                 max_circuits_per_peer: 100,
+//                 ..Default::default()
+//             },
+//         ),
         connection_limits: memory_connection_limits::Behaviour::with_max_percentage(0.9),
     };
 
