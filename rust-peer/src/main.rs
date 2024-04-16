@@ -1,27 +1,27 @@
-mod protocol;
-
 use anyhow::{Context, Result};
 use clap::Parser;
 use futures::future::{select, Either};
 use futures::StreamExt;
+// use futures::stream::StreamExt;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::{
     core::muxing::StreamMuxerBox,
+    yamux, noise,
+    tcp,
     ping,
     dcutr,
     dns, gossipsub, identify, identity,
     memory_connection_limits,
     multiaddr::{Multiaddr, Protocol},
     quic, relay,
-    swarm::{NetworkBehaviour, Swarm, SwarmBuilder, SwarmEvent},
-    PeerId, StreamProtocol, Transport,
+    swarm::{NetworkBehaviour, Swarm, SwarmEvent},
+    PeerId, StreamProtocol, SwarmBuilder, Transport
 };
 use libp2p_webrtc as webrtc;
+// use libp2p::Transport;
 use libp2p_webrtc::tokio::Certificate;
 use log::{debug, error, info, warn};
-use protocol::FileExchangeCodec;
 use prost::Message;
-use std::iter;
 use std::net::IpAddr;
 use std::path::Path;
 use std::{
@@ -34,11 +34,13 @@ use tokio::fs;
 include!(concat!(env!("OUT_DIR"), "/decontact.rs"));
 
 const TICK_INTERVAL: Duration = Duration::from_secs(15);
+const PORT_TCP: u16 = 1234;
 const PORT_WEBRTC: u16 = 9090;
 const PORT_QUIC: u16 = 9091;
 const LOCAL_KEY_PATH: &str = "./local_key";
 const LOCAL_CERT_PATH: &str = "./cert.pem";
 const GOSSIPSUB_PEER_DISCOVERY: &str = "dcontact._peer-discovery._p2p._pubsub";
+const DCONTACT_TOPIC: &str = "/dContact/3/message/proto";
 
 #[derive(Debug, Parser)]
 #[clap(name = "universal connectivity rust peer")]
@@ -52,12 +54,16 @@ struct Opt {
     external_address: Option<IpAddr>,
 
     /// Gossipsub peer discovery topic.
-    #[clap(long, default_value = "dcontact._peer-discovery._p2p._pubsub")]
+    #[clap(long, default_value = GOSSIPSUB_PEER_DISCOVERY)]
     gossipsub_peer_discovery: String,
+
+    /// Gossipsub peer discovery topic.
+    #[clap(long, default_value = DCONTACT_TOPIC)]
+    dcontact_topic: String,
 
     #[clap(
         long,
-        default_value = "/dns4/ipfs.le-space.de/tcp/p2p/12D3KooWAJjbRkp8FPF5MKgMU53aUTxWkqvDrs4zc1VMbwRwfsbE"
+        default_value = "/dns4/ipfs.le-space.de/tcp/1235/p2p/12D3KooWAJjbRkp8FPF5MKgMU53aUTxWkqvDrs4zc1VMbwRwfsbE"
     )]
     connect: Vec<Multiaddr>
 }
@@ -77,14 +83,20 @@ async fn main() -> Result<()> {
 
     let mut swarm = create_swarm(local_key, webrtc_cert, &opt)?;
 
+    let address_tcp = Multiaddr::from(opt.listen_address)
+        .with(Protocol::Tcp(PORT_TCP));
+
     let address_webrtc = Multiaddr::from(opt.listen_address)
-        .with(Protocol::Udp(PORT_WEBRTC))
-        .with(Protocol::WebRTCDirect);
+         .with(Protocol::Udp(PORT_WEBRTC))
+         .with(Protocol::WebRTCDirect);
 
     let address_quic = Multiaddr::from(opt.listen_address)
         .with(Protocol::Udp(PORT_QUIC))
         .with(Protocol::QuicV1);
 
+    swarm
+        .listen_on(address_tcp.clone())
+        .expect("listen on tcp");
     swarm
         .listen_on(address_webrtc.clone())
         .expect("listen on webrtc");
@@ -99,10 +111,10 @@ async fn main() -> Result<()> {
     }
 
     let peer_discovery = gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY).hash();
+    let dcontact_topic = gossipsub::IdentTopic::new(DCONTACT_TOPIC).hash();
 
     let mut tick = futures_timer::Delay::new(TICK_INTERVAL);
 
-    let now = Instant::now();
     loop {
         match select(swarm.next(), &mut tick).await {
             Either::Left((event, _)) => match event.unwrap() {
@@ -138,6 +150,26 @@ async fn main() -> Result<()> {
                 SwarmEvent::Behaviour(BehaviourEvent::Dcutr(e)) => {
                     info!("Connected to {:?}", e);
                 }
+
+                // Ping event
+          /*      SwarmEvent::Behaviour(BehaviourEvent::Ping(ping::Event {
+                    peer,
+                    result: Ok(rtt),
+                    ..
+                })) => {
+                     debug!("🏓 Ping {peer} in ");
+                    // debug!("🏓 Ping {peer} in {rtt:?}");
+
+                    // send msg
+                    self.event_sender
+                        .send(NetworkEvent::Pong {
+                            peer: peer.to_string(),
+                            rtt: rtt.as_millis() as u64,
+                        })
+                        .await
+                        .expect("Event receiver not to be dropped.");
+                } */
+
                 SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                     libp2p::gossipsub::Event::Message {
                         message_id: _,
@@ -152,10 +184,10 @@ async fn main() -> Result<()> {
                             if let Ok(multiaddr) = Multiaddr::try_from(addr.clone()) {
                                 info!("Received address: {:?}", multiaddr.to_string());
 
-                                if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
-                                                         gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY),
-                                                         &*message.data,)
-                                {error!("Failed to publish peer: {err}")}
+//                                 if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
+//                                                          gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY),
+//                                                          &*message.data,)
+//                                 {error!("Failed to publish peer: {err}")}
                             } else {
                                 error!("Failed to parse multiaddress");
                             }
@@ -164,12 +196,43 @@ async fn main() -> Result<()> {
                         continue;
                     }
 
+//                     if message.topic == dcontact_topic {
+//                         let peer = Peer::decode(&*message.data).unwrap();
+//                         //info!("Received peer from {:?}", peer.addrs);
+//                         for addr in &peer.addrs {
+//                             if let Ok(multiaddr) = Multiaddr::try_from(addr.clone()) {
+//                                 info!("Received address: {:?}", multiaddr.to_string());
+//
+//                                 if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
+//                                                          gossipsub::IdentTopic::new(DCONTACT_TOPIC),
+//                                                          &*message.data,)
+//                                 {error!("Failed to publish peer: {err}")}
+//                             } else {
+//                                 error!("Failed to parse multiaddress");
+//                             }
+//                         }
+//
+//                         continue;
+//                     }
+
                     error!("Unexpected gossipsub topic hash: {:?}", message.topic);
                 }
                 SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                     libp2p::gossipsub::Event::Subscribed { peer_id, topic },
                 )) => {
-                    debug!("{peer_id} subscribed to {topic}");
+                        debug!("{peer_id} subscribed to {topic}");
+
+                         // Indiscriminately add the peer to the routing table
+                        swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                        // subscribe to this topic so we can act as super peer to browsers
+                        if let Err(err) =
+                            swarm
+                            .behaviour_mut()
+                            .gossipsub
+                            .subscribe(&libp2p::gossipsub::IdentTopic::new(topic.as_str()))
+                        {
+                            error!("Failed to subscribe to topic: {err}");
+                        }
                 }
                 SwarmEvent::Behaviour(BehaviourEvent::Identify(e)) => {
                     info!("BehaviourEvent::Identify {:?}", e);
@@ -219,6 +282,7 @@ struct Behaviour {
     gossipsub: gossipsub::Behaviour,
     identify: identify::Behaviour,
     relay: relay::Behaviour,
+    //relay: relay::Behaviour::new(key.public().to_peer_id(), Default::default()),
 //     request_response: request_response::Behaviour<FileExchangeCodec>,
     connection_limits: memory_connection_limits::Behaviour,
 }
@@ -258,17 +322,17 @@ fn create_swarm(
     // Create/subscribe Gossipsub topics
     gossipsub.subscribe(&gossipsub::IdentTopic::new(&opt.gossipsub_peer_discovery))?;
 
-    let transport = {
-        let webrtc = webrtc::tokio::Transport::new(local_key.clone(), certificate);
-        let quic = quic::tokio::Transport::new(quic::Config::new(&local_key));
-
-        let mapped = webrtc.or_transport(quic).map(|fut, _| match fut {
-            Either::Right((local_peer_id, conn)) => (local_peer_id, StreamMuxerBox::new(conn)),
-            Either::Left((local_peer_id, conn)) => (local_peer_id, StreamMuxerBox::new(conn)),
-        });
-
-        dns::TokioDnsConfig::system(mapped)?.boxed()
-    };
+//     let transport = {
+//         let webrtc = webrtc::tokio::Transport::new(local_key.clone(), certificate);
+//         let quic = quic::tokio::Transport::new(quic::Config::new(&local_key));
+//
+//         let mapped = webrtc.or_transport(quic).map(|fut, _| match fut {
+//             Either::Right((local_peer_id, conn)) => (local_peer_id, StreamMuxerBox::new(conn)),
+//             Either::Left((local_peer_id, conn)) => (local_peer_id, StreamMuxerBox::new(conn)),
+//         });
+//
+//         dns::TokioDnsConfig::system(mapped)?.boxed()
+//     };
 
     let identify_config = identify::Behaviour::new(
         identify::Config::new("/ipfs/0.1.0".into(), local_key.public())
@@ -292,18 +356,28 @@ fn create_swarm(
                 ..Default::default()
             },
         ),
-//         request_response: request_response::Behaviour::new(
-//             // TODO: support ProtocolSupport::Full
-//             iter::once((FILE_EXCHANGE_PROTOCOL, ProtocolSupport::Outbound)),
-//             Default::default(),
-//         ),
         connection_limits: memory_connection_limits::Behaviour::with_max_percentage(0.9),
     };
-    Ok(
-        SwarmBuilder::with_tokio_executor(transport, behaviour, local_peer_id)
-            .idle_connection_timeout(Duration::from_secs(60))
-            .build(),
-    )
+
+    let swarm = libp2p::SwarmBuilder::with_new_identity()
+        .with_tokio()
+        .with_tcp(
+            tcp::Config::default(),
+            noise::Config::new,
+            yamux::Config::default,
+        )?
+        .with_quic()
+        .with_other_transport(|id_keys| {
+            Ok(webrtc::tokio::Transport::new(
+                id_keys.clone(),
+               certificate,
+            )
+            .map(|(peer_id, conn), _| (peer_id, StreamMuxerBox::new(conn))))
+        })?
+        .with_behaviour(|key| behaviour)?
+        .build();
+
+    Ok(swarm)
 }
 
 async fn read_or_create_certificate(path: &Path) -> Result<Certificate> {
