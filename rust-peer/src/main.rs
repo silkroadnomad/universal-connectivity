@@ -237,6 +237,10 @@ async fn main() -> Result<()> {
 
                 }
 
+                SwarmEvent::Behaviour(BehaviourEvent::Relay(event)) => {
+                    println!("Relay Event: {event:?}");
+                }
+
                 SwarmEvent::Behaviour(BehaviourEvent::Identify(e)) => {
                     info!("BehaviourEvent::Identify {:?}", e);
 
@@ -269,16 +273,13 @@ async fn main() -> Result<()> {
                                     .behaviour_mut()
                                     .autonat
                                     .add_server(peer_id, Some(addr));
+                                    info!("autonat added server {peer_id}.");
                             }
                         }
 
                         debug!("identify::Event::Received observed_addr: {}", observed_addr);
                         swarm.add_external_address(observed_addr);
                     }
-
-//                     BehaviourEvent::Relay(event) => {
-//                             println!("Relay Event: {event:?}");
-//                     }
                 },
                 _ => {},
             },
@@ -376,10 +377,7 @@ fn create_swarm(
         )?
         .with_quic()
         .with_other_transport(|id_keys| {
-            Ok(webrtc::tokio::Transport::new(
-                id_keys.clone(),
-               certificate,
-            )
+            Ok(webrtc::tokio::Transport::new(id_keys.clone(),certificate,)
             .map(|(peer_id, conn), _| (peer_id, StreamMuxerBox::new(conn))))
         })?
         .with_behaviour(|key| behaviour)?
