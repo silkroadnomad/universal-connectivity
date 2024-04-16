@@ -195,7 +195,7 @@ async fn main() -> Result<()> {
                                 info!("Received address: {:?} and re-publishing message", multiaddr.to_string());
 
                                 if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
-                                                         gossipsub::IdentTopic::new(&newTopic),
+                                                         gossipsub::IdentTopic::new(message.topic.to_string()),
                                                          &*message.data,)
                                 {error!("Failed to publish peer: {err}")}
                             } else {
