@@ -240,9 +240,9 @@ async fn main() -> Result<()> {
                             },
                     } = e {
                         info!("protocols: {:?}", protocols);
-                        info!("adding server: {:?}", observed_addr);
-                        swarm.behaviour_mut().autonat.add_server(
-                            peer_id, Some(observed_addr.clone()));
+                        info!("listen_addrs: {:?}", listen_addrs);
+                        info!("observed_addr: {:?}", observed_addr);
+                        swarm.behaviour_mut().autonat.add_server(peer_id, Some(observed_addr.clone()));
 
 //                         if protocols
 //                             .iter()
