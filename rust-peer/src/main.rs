@@ -242,7 +242,12 @@ async fn main() -> Result<()> {
                         info!("protocols: {:?}", protocols);
                         info!("listen_addrs: {:?}", listen_addrs);
                         info!("observed_addr: {:?}", observed_addr);
-                        swarm.behaviour_mut().autonat.add_server(peer_id, Some(observed_addr.clone()));
+
+                        let peer_multiaddr = observed_addr.clone().with(Protocol::P2p(peer_id.into()));
+
+                        println!("Peer Multiaddr: {}", peer_multiaddr);
+
+                        swarm.behaviour_mut().autonat.add_server(peer_id, Some(peer_multiaddr.clone()));
 
 //                         if protocols
 //                             .iter()
