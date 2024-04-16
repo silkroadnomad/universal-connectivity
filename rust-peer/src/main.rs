@@ -240,11 +240,15 @@ async fn main() -> Result<()> {
                             },
                     } = e {
                         info!("protocols: {:?}", protocols);
-                        if protocols
-                            .iter()
-                            .any(|p| p.to_string() == "/ipfs/id/1.0.0")
-                        {
-                            info!("adding server: {:?}", observed_addr);
+                        info!("adding server: {:?}", observed_addr);
+                        swarm.behaviour_mut().autonat.add_server(
+                            peer_id, Some(observed_addr.clone()));
+
+//                         if protocols
+//                             .iter()
+//                             .any(|p| p.to_string() == "/ipfs/id/1.0.0")
+//                         {
+//                             info!("adding server: {:?}", observed_addr);
 //                             for addr in &observed_addr.clone() {
 //                                 swarm
 //                                     .behaviour_mut()
@@ -252,7 +256,7 @@ async fn main() -> Result<()> {
 //                                     .add_server(peer_id, Some(addr.toString()));
 //                                     info!("autonat added server {peer_id}.");
 //                             }
-                        }
+//                         }
 
                         debug!("identify::Event::Received observed_addr: {}", observed_addr);
                         swarm.add_external_address(observed_addr);
