@@ -5,6 +5,7 @@ use futures::StreamExt;
 // use futures::stream::StreamExt;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::{
+    autonat::Behaviour as Autonat,
     core::muxing::StreamMuxerBox,
     yamux, noise,
     tcp,
@@ -182,12 +183,12 @@ async fn main() -> Result<()> {
                          // subscribe to this topic so we can act as super peer to browsers
                         let newTopic = gossipsub::IdentTopic::new(message.topic.to_string());
                         //swarm.behaviour_mut().gossipsub.subscribe(&newTopic)?;
-                        if let Err(err) =
-                            swarm.behaviour_mut().gossipsub.subscribe(&newTopic)
+                        if let Err(err) = swarm.behaviour_mut().gossipsub.subscribe(&newTopic)
                         {
                             error!("Failed to subscribe to topic: {err}");
                         }
                        info!(" subscribe to {:?}", message.topic);
+
 //                     if message.topic == peer_discovery {
 
                         for addr in &peer.addrs {
@@ -199,7 +200,7 @@ async fn main() -> Result<()> {
                                                          &*message.data,)
                                 {error!("Failed to publish peer: {err}")}
                             } else {
-                                        error!("Failed to parse multiaddress");
+                                error!("Failed to parse multiaddress");
                             }
                         }
 //                     }
@@ -225,6 +226,7 @@ async fn main() -> Result<()> {
 
 //                     error!("Unexpected gossipsub topic hash: {:?}", message.topic);
                 }
+
                 SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                     libp2p::gossipsub::Event::Subscribed { peer_id, topic },
                 )) => {
@@ -258,9 +260,25 @@ async fn main() -> Result<()> {
                             },
                     } = e
                     {
+                        if protocols
+                            .iter()
+                            .any(|p| p.to_string() == "/ipfs/id/1.0.0")
+                        {
+                            for addr in listen_addrs.clone() {
+                                swarm
+                                    .behaviour_mut()
+                                    .autonat
+                                    .add_server(peer_id, Some(addr));
+                            }
+                        }
+
                         debug!("identify::Event::Received observed_addr: {}", observed_addr);
                         swarm.add_external_address(observed_addr);
                     }
+
+//                     BehaviourEvent::Relay(event) => {
+//                             println!("Relay Event: {event:?}");
+//                     }
                 },
                 _ => {},
             },
@@ -282,6 +300,7 @@ struct Behaviour {
     dcutr: dcutr::Behaviour,
     gossipsub: gossipsub::Behaviour,
     identify: identify::Behaviour,
+    autonat: Autonat,
     relay: relay::Behaviour,
     connection_limits: memory_connection_limits::Behaviour,
 }
@@ -332,6 +351,7 @@ fn create_swarm(
         gossipsub,
         identify: identify_config,
         relay: relay::Behaviour::new(local_key.public().to_peer_id(), Default::default()),
+        autonat: Autonat::new(local_peer_id, Default::default()),
 //         relay: relay::Behaviour::new(
 //             local_peer_id,
 //             relay::Config {
