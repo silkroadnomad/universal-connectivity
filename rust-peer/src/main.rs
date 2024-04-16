@@ -351,7 +351,7 @@ fn create_swarm(
         gossipsub,
         identify: identify_config,
         relay: relay::Behaviour::new(local_key.public().to_peer_id(), Default::default()),
-        autonat: Autonat::new(local_peer_id, Default::default()),
+        autonat: Autonat::new(local_key.public().to_peer_id(), Default::default()),
 //         relay: relay::Behaviour::new(
 //             local_peer_id,
 //             relay::Config {
