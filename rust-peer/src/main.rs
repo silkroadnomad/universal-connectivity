@@ -244,8 +244,8 @@ async fn main() -> Result<()> {
                             .iter()
                             .any(|p| p.to_string() == "/ipfs/id/1.0.0")
                         {
-                            info!("adding server: {:?}", listen_addrs);
-                            for addr in listen_addrs.clone() {
+                            info!("adding server: {:?}", observed_addr);
+                            for addr in observed_addr.clone() {
                                 swarm
                                     .behaviour_mut()
                                     .autonat
