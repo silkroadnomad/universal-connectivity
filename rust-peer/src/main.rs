@@ -142,8 +142,6 @@ async fn main() -> Result<()> {
                 }
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     warn!("Connection to {peer_id} closed: {cause:?}");
-//                     swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
-//                     info!("Removed {peer_id} from the routing table (if it was in there).");
                 }
                 SwarmEvent::Behaviour(BehaviourEvent::Relay(e)) => {
                     debug!("{:?}", e);
@@ -151,26 +149,6 @@ async fn main() -> Result<()> {
                 SwarmEvent::Behaviour(BehaviourEvent::Dcutr(e)) => {
                     info!("Connected to {:?}", e);
                 }
-
-                // Ping event
-          /*      SwarmEvent::Behaviour(BehaviourEvent::Ping(ping::Event {
-                    peer,
-                    result: Ok(rtt),
-                    ..
-                })) => {
-                     debug!("🏓 Ping {peer} in ");
-                    // debug!("🏓 Ping {peer} in {rtt:?}");
-
-                    // send msg
-                    self.event_sender
-                        .send(NetworkEvent::Pong {
-                            peer: peer.to_string(),
-                            rtt: rtt.as_millis() as u64,
-                        })
-                        .await
-                        .expect("Event receiver not to be dropped.");
-                } */
-
                 SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                     libp2p::gossipsub::Event::Message {
                         message_id: _,
@@ -182,7 +160,6 @@ async fn main() -> Result<()> {
                         info!("Received peer from {:?}", peer.addrs);
                          // subscribe to this topic so we can act as super peer to browsers
                         let newTopic = gossipsub::IdentTopic::new(message.topic.to_string());
-                        //swarm.behaviour_mut().gossipsub.subscribe(&newTopic)?;
                         if let Err(err) = swarm.behaviour_mut().gossipsub.subscribe(&newTopic)
                         {
                             error!("Failed to subscribe to topic: {err}");
@@ -243,28 +220,13 @@ async fn main() -> Result<()> {
                         info!("listen_addrs: {:?}", listen_addrs);
                         info!("observed_addr: {:?}", observed_addr);
 
-                        let peer_multiaddr = observed_addr.clone().with(Protocol::P2p(peer_id.into()));
+                        let peer_multiaddr = observed_addr.clone()
+                            .with(Protocol::P2pCircuit)
+                            .with(Protocol::P2p(peer_id.into()));
 
                         println!("Peer Multiaddr: {}", peer_multiaddr);
 
                         swarm.behaviour_mut().autonat.add_server(peer_id, Some(peer_multiaddr.clone()));
-
-//                         if protocols
-//                             .iter()
-//                             .any(|p| p.to_string() == "/ipfs/id/1.0.0")
-//                         {
-//                             info!("adding server: {:?}", observed_addr);
-//                             for addr in &observed_addr.clone() {
-//                                 swarm
-//                                     .behaviour_mut()
-//                                     .autonat
-//                                     .add_server(peer_id, Some(addr.toString()));
-//                                     info!("autonat added server {peer_id}.");
-//                             }
-//                         }
-
-                        debug!("identify::Event::Received observed_addr: {}", observed_addr);
-                        swarm.add_external_address(observed_addr);
                     }
                 },
                 _ => {},
@@ -339,18 +301,6 @@ fn create_swarm(
         identify: identify_config,
         relay: relay::Behaviour::new(local_key.public().to_peer_id(), Default::default()),
         autonat: Autonat::new(local_key.public().to_peer_id(), Default::default()),
-//         relay: relay::Behaviour::new(
-//             local_peer_id,
-//             relay::Config {
-//                 max_reservations: usize::MAX,
-//                 max_reservations_per_peer: 100,
-//                 reservation_rate_limiters: Vec::default(),
-//                 circuit_src_rate_limiters: Vec::default(),
-//                 max_circuits: usize::MAX,
-//                 max_circuits_per_peer: 100,
-//                 ..Default::default()
-//             },
-//         ),
         connection_limits: memory_connection_limits::Behaviour::with_max_percentage(0.9),
     };
 
