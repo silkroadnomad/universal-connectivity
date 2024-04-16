@@ -239,7 +239,7 @@ async fn main() -> Result<()> {
                                 ..
                             },
                     } = e {
-                        info!("protocols{p.to_string() }.");
+                        info!("protocols: {:?}", protocols);
                         if protocols
                             .iter()
                             .any(|p| p.to_string() == "/ipfs/id/1.0.0")
