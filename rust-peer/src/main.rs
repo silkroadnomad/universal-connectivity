@@ -177,24 +177,32 @@ async fn main() -> Result<()> {
                         message,
                     },
                 )) => {
-                    if message.topic == peer_discovery {
-                        let peer = Peer::decode(&*message.data).unwrap();
-                        //info!("Received peer from {:?}", peer.addrs);
-                        for addr in &peer.addrs {
-                            if let Ok(multiaddr) = Multiaddr::try_from(addr.clone()) {
-                                info!("Received address: {:?}", multiaddr.to_string());
-
+                         // subscribe to this topic so we can act as super peer to browsers
+                        if let Err(err) =
+                            swarm
+                            .behaviour_mut()
+                            .gossipsub
+                            .subscribe(&libp2p::gossipsub::IdentTopic::new(message.topic))
+                        {
+                            error!("Failed to subscribe to topic: {err}");
+                        }
+                       info!(" subscribe to topic:  to {:?}", message.topic);
+//                     if message.topic == peer_discovery {
+//                         let peer = Peer::decode(&*message.data).unwrap();
+//                         //info!("Received peer from {:?}", peer.addrs);
+//                         for addr in &peer.addrs {
+//                             if let Ok(multiaddr) = Multiaddr::try_from(addr.clone()) {
+//                                 info!("Received address: {:?}", multiaddr.to_string());
+//
 //                                 if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
 //                                                          gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY),
 //                                                          &*message.data,)
 //                                 {error!("Failed to publish peer: {err}")}
-                            } else {
-                                error!("Failed to parse multiaddress");
-                            }
-                        }
-
-                        continue;
-                    }
+//                             } else {
+//                                         error!("Failed to parse multiaddress");
+//                             }
+//                         }
+//                     }
 
 //                     if message.topic == dcontact_topic {
 //                         let peer = Peer::decode(&*message.data).unwrap();
@@ -215,8 +223,8 @@ async fn main() -> Result<()> {
 //                         continue;
 //                     }
 
-                    error!("Unexpected gossipsub topic hash: {:?}", message.topic);
-                }
+//                     error!("Unexpected gossipsub topic hash: {:?}", message.topic);
+//                 }
                 SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                     libp2p::gossipsub::Event::Subscribed { peer_id, topic },
                 )) => {
@@ -224,16 +232,9 @@ async fn main() -> Result<()> {
 
                          // Indiscriminately add the peer to the routing table
                         swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                        // subscribe to this topic so we can act as super peer to browsers
-                        if let Err(err) =
-                            swarm
-                            .behaviour_mut()
-                            .gossipsub
-                            .subscribe(&libp2p::gossipsub::IdentTopic::new(topic.as_str()))
-                        {
-                            error!("Failed to subscribe to topic: {err}");
-                        }
+
                 }
+
                 SwarmEvent::Behaviour(BehaviourEvent::Identify(e)) => {
                     info!("BehaviourEvent::Identify {:?}", e);
 
