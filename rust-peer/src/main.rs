@@ -178,11 +178,10 @@ async fn main() -> Result<()> {
                     },
                 )) => {
                          // subscribe to this topic so we can act as super peer to browsers
+                        let newTopic = gossipsub::IdentTopic::new(message.topic.to_string());
+                        //swarm.behaviour_mut().gossipsub.subscribe(&newTopic)?;
                         if let Err(err) =
-                            swarm
-                            .behaviour_mut()
-                            .gossipsub
-                            .subscribe(&libp2p::gossipsub::IdentTopic::new(message.topic))
+                            swarm.behaviour_mut().gossipsub.subscribe(&newTopic)
                         {
                             error!("Failed to subscribe to topic: {err}");
                         }
@@ -224,7 +223,7 @@ async fn main() -> Result<()> {
 //                     }
 
 //                     error!("Unexpected gossipsub topic hash: {:?}", message.topic);
-//                 }
+                }
                 SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                     libp2p::gossipsub::Event::Subscribed { peer_id, topic },
                 )) => {
