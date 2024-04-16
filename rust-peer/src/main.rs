@@ -177,6 +177,8 @@ async fn main() -> Result<()> {
                         message,
                     },
                 )) => {
+                        let peer = Peer::decode(&*message.data).unwrap();
+                        info!("Received peer from {:?}", peer.addrs);
                          // subscribe to this topic so we can act as super peer to browsers
                         let newTopic = gossipsub::IdentTopic::new(message.topic.to_string());
                         //swarm.behaviour_mut().gossipsub.subscribe(&newTopic)?;
@@ -185,22 +187,21 @@ async fn main() -> Result<()> {
                         {
                             error!("Failed to subscribe to topic: {err}");
                         }
-                       info!(" subscribe to topic:  to {:?}", message.topic);
+                       info!(" subscribe to {:?}", message.topic);
 //                     if message.topic == peer_discovery {
-//                         let peer = Peer::decode(&*message.data).unwrap();
-//                         //info!("Received peer from {:?}", peer.addrs);
-//                         for addr in &peer.addrs {
-//                             if let Ok(multiaddr) = Multiaddr::try_from(addr.clone()) {
-//                                 info!("Received address: {:?}", multiaddr.to_string());
-//
-//                                 if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
-//                                                          gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY),
-//                                                          &*message.data,)
-//                                 {error!("Failed to publish peer: {err}")}
-//                             } else {
-//                                         error!("Failed to parse multiaddress");
-//                             }
-//                         }
+
+                        for addr in &peer.addrs {
+                            if let Ok(multiaddr) = Multiaddr::try_from(addr.clone()) {
+                                info!("Received address: {:?} and re-publishing message", multiaddr.to_string());
+
+                                if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
+                                                         gossipsub::IdentTopic::new(GOSSIPSUB_PEER_DISCOVERY),
+                                                         &*message.data,)
+                                {error!("Failed to publish peer: {err}")}
+                            } else {
+                                        error!("Failed to parse multiaddress");
+                            }
+                        }
 //                     }
 
 //                     if message.topic == dcontact_topic {
