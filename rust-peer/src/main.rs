@@ -189,8 +189,6 @@ async fn main() -> Result<()> {
                         }
                        info!(" subscribe to {:?}", message.topic);
 
-//                     if message.topic == peer_discovery {
-
                         for addr in &peer.addrs {
                             if let Ok(multiaddr) = Multiaddr::try_from(addr.clone()) {
                                 info!("Received address: {:?} and re-publishing message", multiaddr.to_string());
@@ -203,28 +201,6 @@ async fn main() -> Result<()> {
                                 error!("Failed to parse multiaddress");
                             }
                         }
-//                     }
-
-//                     if message.topic == dcontact_topic {
-//                         let peer = Peer::decode(&*message.data).unwrap();
-//                         //info!("Received peer from {:?}", peer.addrs);
-//                         for addr in &peer.addrs {
-//                             if let Ok(multiaddr) = Multiaddr::try_from(addr.clone()) {
-//                                 info!("Received address: {:?}", multiaddr.to_string());
-//
-//                                 if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
-//                                                          gossipsub::IdentTopic::new(DCONTACT_TOPIC),
-//                                                          &*message.data,)
-//                                 {error!("Failed to publish peer: {err}")}
-//                             } else {
-//                                 error!("Failed to parse multiaddress");
-//                             }
-//                         }
-//
-//                         continue;
-//                     }
-
-//                     error!("Unexpected gossipsub topic hash: {:?}", message.topic);
                 }
 
                 SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
@@ -262,8 +238,8 @@ async fn main() -> Result<()> {
                                 observed_addr,
                                 ..
                             },
-                    } = e
-                    {
+                    } = e {
+                        info!("protocols{p.to_string() }.");
                         if protocols
                             .iter()
                             .any(|p| p.to_string() == "/ipfs/id/1.0.0")
