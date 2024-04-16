@@ -245,13 +245,13 @@ async fn main() -> Result<()> {
                             .any(|p| p.to_string() == "/ipfs/id/1.0.0")
                         {
                             info!("adding server: {:?}", observed_addr);
-                            for addr in observed_addr.clone() {
-                                swarm
-                                    .behaviour_mut()
-                                    .autonat
-                                    .add_server(peer_id, Some(addr));
-                                    info!("autonat added server {peer_id}.");
-                            }
+//                             for addr in &observed_addr.clone() {
+//                                 swarm
+//                                     .behaviour_mut()
+//                                     .autonat
+//                                     .add_server(peer_id, Some(addr.toString()));
+//                                     info!("autonat added server {peer_id}.");
+//                             }
                         }
 
                         debug!("identify::Event::Received observed_addr: {}", observed_addr);
