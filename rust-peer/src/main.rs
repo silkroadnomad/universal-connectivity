@@ -13,6 +13,8 @@ use libp2p::{
     dcutr,
     dns, gossipsub, identify, identity,
     memory_connection_limits,
+    kad::record::store::MemoryStore,
+    kad::{Kademlia, KademliaConfig},
     multiaddr::{Multiaddr, Protocol},
     quic, relay,
     swarm::{NetworkBehaviour, Swarm, SwarmEvent},
@@ -34,6 +36,7 @@ use tokio::fs;
 
 include!(concat!(env!("OUT_DIR"), "/decontact.rs"));
 
+const KADEMLIA_PROTOCOL_NAME: StreamProtocol = StreamProtocol::new("/universal-connectivity/lan/kad/1.0.0");
 const TICK_INTERVAL: Duration = Duration::from_secs(15);
 const PORT_TCP: u16 = 1234;
 const PORT_WEBRTC: u16 = 9090;
@@ -142,12 +145,17 @@ async fn main() -> Result<()> {
                 }
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                     warn!("Connection to {peer_id} closed: {cause:?}");
+                    swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
+                    info!("Removed {peer_id} from the routing table (if it was in there).");
                 }
                 SwarmEvent::Behaviour(BehaviourEvent::Relay(e)) => {
                     debug!("{:?}", e);
                 }
                 SwarmEvent::Behaviour(BehaviourEvent::Dcutr(e)) => {
                     info!("Connected to {:?}", e);
+                }
+                SwarmEvent::Behaviour(BehaviourEvent::Kademlia(e)) => {
+                    debug!("Kademlia event: {:?}", e);
                 }
                 SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                     libp2p::gossipsub::Event::Message {
@@ -200,6 +208,10 @@ async fn main() -> Result<()> {
                     if let identify::Event::Error { peer_id, error } = e {
                         match error {
                             libp2p::swarm::StreamUpgradeError::Timeout => {
+                                // When a browser tab closes, we don't get a swarm event
+                                // maybe there's a way to get this with TransportEvent
+                                // but for now remove the peer from routing table if there's an Identify timeout
+                                swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
                                 info!("Removed {peer_id} from the routing table (if it was in there).");
                             }
                             _ => {
@@ -216,17 +228,38 @@ async fn main() -> Result<()> {
                                 ..
                             },
                     } = e {
-                        info!("protocols: {:?}", protocols);
-                        info!("listen_addrs: {:?}", listen_addrs);
-                        info!("observed_addr: {:?}", observed_addr);
+                            debug!("identify::Event::Received observed_addr: {}", observed_addr);
+                            swarm.add_external_address(observed_addr);
 
-                        let peer_multiaddr = observed_addr.clone()
-                            .with(Protocol::P2pCircuit)
-                            .with(Protocol::P2p(peer_id.into()));
+                            // TODO: The following should no longer be necessary after https://github.com/libp2p/rust-libp2p/pull/4371.
+                            if protocols.iter().any(|p| p == &KADEMLIA_PROTOCOL_NAME) {
+                                for addr in listen_addrs {
+                                    debug!("identify::Event::Received listen addr: {}", addr);
+                                    // TODO (fixme): the below doesn't work because the address is still missing /webrtc/p2p even after https://github.com/libp2p/js-libp2p-webrtc/pull/121
+                                    // swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
 
-                        println!("Peer Multiaddr: {}", peer_multiaddr);
+                                    let webrtc_address = addr
+                                        .with(Protocol::WebRTCDirect)
+                                        .with(Protocol::P2p(peer_id));
 
-                        swarm.behaviour_mut().autonat.add_server(peer_id, Some(peer_multiaddr.clone()));
+                                    swarm
+                                        .behaviour_mut()
+                                        .kademlia
+                                        .add_address(&peer_id, webrtc_address.clone());
+                                    info!("Added {webrtc_address} to the routing table.");
+                                }
+                            }
+//                         info!("protocols: {:?}", protocols);
+//                         info!("listen_addrs: {:?}", listen_addrs);
+//                         info!("observed_addr: {:?}", observed_addr);
+//
+//                         let peer_multiaddr = observed_addr.clone()
+//                             .with(Protocol::P2pCircuit)
+//                             .with(Protocol::P2p(peer_id.into()));
+//
+//                         println!("Peer Multiaddr: {}", peer_multiaddr);
+//
+//                         swarm.behaviour_mut().autonat.add_server(peer_id, Some(peer_multiaddr.clone()));
                     }
                 },
                 _ => {},
@@ -294,11 +327,18 @@ fn create_swarm(
             .with_interval(Duration::from_secs(60)), // do this so we can get timeouts for dropped WebRTC connections
     );
 
+    // Create a Kademlia behaviour.
+    let mut cfg = KademliaConfig::default();
+    cfg.set_protocol_names(vec![KADEMLIA_PROTOCOL_NAME]);
+    let store = MemoryStore::new(local_peer_id);
+    let kad_behaviour = Kademlia::with_config(local_peer_id, store, cfg);
+
     let behaviour = Behaviour {
         ping: ping::Behaviour::new(ping::Config::new()),
         dcutr: dcutr::Behaviour::new(local_key.public().to_peer_id()),
         gossipsub,
         identify: identify_config,
+        kademlia: kad_behaviour,
         relay: relay::Behaviour::new(local_key.public().to_peer_id(), Default::default()),
         autonat: Autonat::new(local_key.public().to_peer_id(), Default::default()),
         connection_limits: memory_connection_limits::Behaviour::with_max_percentage(0.9),
